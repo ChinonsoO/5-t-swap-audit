@@ -290,6 +290,16 @@ contract TSwapPool is ERC20 {
         revertIfZero(outputReserves)
         returns (uint256 inputAmount)
     {
+        //x * y = (x + Δx) * (y - Δy)
+        //x * y = (x + Δx) * (y - outputAmount )
+        // x * y = xy - xOutputAmout + Δxy -  ΔxOutputAmount (xy cancel each other out)
+       //0 = -xOutputAmount + Δxy - ΔxOutputAmount
+       //xOutputAmount = Δxy - ΔxOutputAmount
+       //xOutputAmount = Δx(y - OutputAmount) = Δx(outPutReserves - outputAmount) = inputAmount(outputReserves - outputAmount)
+       //inputReserves * outputAmount = inputAmount(outputReserves - outputAmount)
+       //inputReserves * outputAmount / (outputReserves - outputAmount) = inputAmount // notice this is the exact same function we return
+       //plus fees... ignore them for now
+
         return
             ((inputReserves * outputAmount) * 10000) /
             ((outputReserves - outputAmount) * 997);
@@ -396,6 +406,7 @@ contract TSwapPool is ERC20 {
             revert TSwapPool__InvalidToken();
         }
 
+        //@audit //breaks our core invariant, our ratio is no longer maintained
         swap_count++;
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
@@ -428,7 +439,8 @@ contract TSwapPool is ERC20 {
     ) public view returns (uint256) {
         uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
         uint256 wethReserves = i_wethToken.balanceOf(address(this));
-        return (wethToDeposit * poolTokenReserves) / wethReserves;
+        // (delta Y * X) / Y = delta X
+        return (wethToDeposit * poolTokenReserves) /wethReserves ;
     }
 
     /// @notice a more verbose way of getting the total supply of liquidity tokens
