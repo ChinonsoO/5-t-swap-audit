@@ -11,7 +11,7 @@ import {TSwapPool} from "../../src/TSwapPool.sol";
 
 contract Handler is StdInvariant, Test {
 
-    //These pools have 2 assests.
+    //These pools have 2 assests. 
     ERC20Mock poolToken;
     ERC20Mock weth;
 

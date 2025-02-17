@@ -91,4 +91,78 @@ contract TSwapPoolTest is Test {
         assertEq(pool.totalSupply(), 0);
         assert(weth.balanceOf(liquidityProvider) + poolToken.balanceOf(liquidityProvider) > 400e18);
     }
+
+    function test_FundsLockedAfterZeroPoolTokensDeposit() public {
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+
+        //provide initial liquidity of 100weth and 0 pool tokens.
+        pool.deposit(100e18, 100e18, 0, uint64(block.timestamp));
+
+
+        //assert funds left liquidity provider
+        assertEq(pool.balanceOf(liquidityProvider), 100e18);
+        assertEq(weth.balanceOf(liquidityProvider), 100e18);
+        assertEq(poolToken.balanceOf(liquidityProvider), 200e18);
+
+        //assert funds in pool
+        assertEq(weth.balanceOf(address(pool)), 100e18);
+        assertEq(poolToken.balanceOf(address(pool)), 0);
+
+        pool.approve(address(pool), 100e18);
+        
+        //Below reverts and funds are locked.
+        vm.expectRevert();
+        pool.withdraw(100e18, 100e18, 0, uint64(block.timestamp));
+        vm.stopPrank();
+
+        //Another user makes deposit
+        vm.startPrank(user);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+
+        pool.deposit(5e18, 5e18, 5e18, uint64(block.timestamp));
+
+        //assert funds left user
+        assertEq(pool.balanceOf(user), 5e18);
+        assertEq(weth.balanceOf(user), 5e18);
+        assertEq(poolToken.balanceOf(user), 5e18);
+
+        //assert funds in pool
+        assertEq(weth.balanceOf(address(pool)), 105e18);
+        assertEq(poolToken.balanceOf(address(pool)), 5e18);
+
+        //Reverts and funds are locked.
+        vm.expectRevert();
+        pool.withdraw(5e18, 5e18, 5e18, uint64(block.timestamp));
+
+
+        //Another user makes deposit
+        vm.startPrank(address(3));
+        pool.approve(address(pool), 100e18);
+        weth.mint(address(3), 5e18);
+        poolToken.mint(address(3), 5e18);
+
+        weth.approve(address(pool), 5e18);
+        poolToken.approve(address(pool), 5e18);
+        pool.approve(address(pool), 5e18);
+
+        pool.deposit(5e18, 5e18, 5e18, uint64(block.timestamp));
+
+        //assert funds left user
+        assertEq(pool.balanceOf(address(3)), 5e18);
+        assertEq(weth.balanceOf(address(3)), 0);
+        assertEq(poolToken.balanceOf(address(3)), 0);
+
+        //Reverts Users funds are locked,
+        vm.expectRevert();
+        pool.withdraw(5e18, 5e18, 5e18, uint64(block.timestamp));
+
+        vm.stopPrank();
+
+
+    }
+
+    
 }

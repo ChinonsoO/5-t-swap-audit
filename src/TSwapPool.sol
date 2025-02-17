@@ -16,6 +16,7 @@ pragma solidity 0.8.20;
 
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {console} from "forge-std/console.sol";
 
 contract TSwapPool is ERC20 {
     error TSwapPool__DeadlineHasPassed(uint64 deadline);
@@ -33,6 +34,10 @@ contract TSwapPool is ERC20 {
     );
     error TSwapPool__InvalidToken();
     error TSwapPool__OutputTooLow(uint256 actual, uint256 min);
+
+    error TSwapPool__WethOutputTooLow(uint256 actual, uint256 min);
+    error TSwapPool__PoolTokenOutputTooLow(uint256 actual, uint256 min);
+
     error TSwapPool__MustBeMoreThanZero();
 
     using SafeERC20 for IERC20;
@@ -43,7 +48,7 @@ contract TSwapPool is ERC20 {
     IERC20 private immutable i_wethToken;
     IERC20 private immutable i_poolToken;
     uint256 private constant MINIMUM_WETH_LIQUIDITY = 1_000_000_000;
-    uint256 private swap_count = 0;
+    uint256 private swap_count = 0; //Why are we keeping track of a swap count?
     uint256 private constant SWAP_COUNT_MAX = 10;
 
     /*//////////////////////////////////////////////////////////////
@@ -74,7 +79,7 @@ contract TSwapPool is ERC20 {
         if (deadline < uint64(block.timestamp)) {
             revert TSwapPool__DeadlineHasPassed(deadline);
         }
-        _;
+        _; //q - shouldn't this be before the if statement?
     }
 
     modifier revertIfZero(uint256 amount) {
@@ -114,11 +119,17 @@ contract TSwapPool is ERC20 {
         uint256 wethToDeposit,
         uint256 minimumLiquidityTokensToMint,
         uint256 maximumPoolTokensToDeposit,
+        //@audit this deadline is not used for this function
         uint64 deadline
+        //Impact: HIGH A user who expects a deposit to fail, will go through. Severe disruption of functionality.
+        //Likelihood: HIGH: ALWAYS THE CASE 
     )
         external
         revertIfZero(wethToDeposit)
-        returns (uint256 liquidityTokensToMint)
+        returns (
+            /// q - why are we not reverting if maximumPoolTokensToDeposit is zero?
+            uint256 liquidityTokensToMint
+        )
     {
         if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
             revert TSwapPool__WethDepositAmountTooLow(
@@ -179,7 +190,7 @@ contract TSwapPool is ERC20 {
                 maximumPoolTokensToDeposit,
                 wethToDeposit
             );
-            liquidityTokensToMint = wethToDeposit;
+            liquidityTokensToMint = wethToDeposit; //q - What is the assignment doing?
         }
     }
 
@@ -219,7 +230,7 @@ contract TSwapPool is ERC20 {
         revertIfDeadlinePassed(deadline)
         revertIfZero(liquidityTokensToBurn)
         revertIfZero(minWethToWithdraw)
-        revertIfZero(minPoolTokensToWithdraw)
+        revertIfZero(minPoolTokensToWithdraw) /// @audit we revert if the minimum pool tokens to withdraw is zero, we could create a situation where the user can't withdraw their funds
     {
         // We do the same math as above
         uint256 wethToWithdraw = (liquidityTokensToBurn *
@@ -227,14 +238,12 @@ contract TSwapPool is ERC20 {
         uint256 poolTokensToWithdraw = (liquidityTokensToBurn *
             i_poolToken.balanceOf(address(this))) / totalLiquidityTokenSupply();
 
+        console.log("TESTTTTTTTTTTTTTTTTTTTTTTTTT");
         if (wethToWithdraw < minWethToWithdraw) {
-            revert TSwapPool__OutputTooLow(wethToWithdraw, minWethToWithdraw);
+            revert TSwapPool__WethOutputTooLow(wethToWithdraw, minWethToWithdraw);
         }
         if (poolTokensToWithdraw < minPoolTokensToWithdraw) {
-            revert TSwapPool__OutputTooLow(
-                poolTokensToWithdraw,
-                minPoolTokensToWithdraw
-            );
+            revert TSwapPool__PoolTokenOutputTooLow(poolTokensToWithdraw, minPoolTokensToWithdraw);
         }
 
         _burn(msg.sender, liquidityTokensToBurn);
@@ -293,12 +302,12 @@ contract TSwapPool is ERC20 {
         //x * y = (x + Δx) * (y - Δy)
         //x * y = (x + Δx) * (y - outputAmount )
         // x * y = xy - xOutputAmout + Δxy -  ΔxOutputAmount (xy cancel each other out)
-       //0 = -xOutputAmount + Δxy - ΔxOutputAmount
-       //xOutputAmount = Δxy - ΔxOutputAmount
-       //xOutputAmount = Δx(y - OutputAmount) = Δx(outPutReserves - outputAmount) = inputAmount(outputReserves - outputAmount)
-       //inputReserves * outputAmount = inputAmount(outputReserves - outputAmount)
-       //inputReserves * outputAmount / (outputReserves - outputAmount) = inputAmount // notice this is the exact same function we return
-       //plus fees... ignore them for now
+        //0 = -xOutputAmount + Δxy - ΔxOutputAmount
+        //xOutputAmount = Δxy - ΔxOutputAmount
+        //xOutputAmount = Δx(y - OutputAmount) = Δx(outPutReserves - outputAmount) = inputAmount(outputReserves - outputAmount)
+        //inputReserves * outputAmount = inputAmount(outputReserves - outputAmount)
+        //inputReserves * outputAmount / (outputReserves - outputAmount) = inputAmount // notice this is the exact same function we return
+        //plus fees... ignore them for now
 
         return
             ((inputReserves * outputAmount) * 10000) /
@@ -347,7 +356,8 @@ contract TSwapPool is ERC20 {
     function swapExactOutput(
         IERC20 inputToken,
         IERC20 outputToken,
-        uint256 outputAmount,
+        uint256 outputAmount, //No minimum output amount, user can make multiplel small swaps and exploit the  extra token that is given every 10 swaps
+        // unint256 maxInputAmount, @audit we should have a max input amount for slippage protection
         uint64 deadline
     )
         public
@@ -363,6 +373,16 @@ contract TSwapPool is ERC20 {
             inputReserves,
             outputReserves
         );
+
+        //Wait a sec, the other function has a conditional but this one doesn't?
+
+        //NO SLIPPAGE PROTECTION
+        //Ex. I want 10 output WETH, and my input is DAI
+        //Send the transcation, but the pool gets a massive transaction that changes the price
+        //Now 10 output Weth is worth 1000 Dai,
+        //We get our 10 output weth but now we have overpayed far more than what we wanted
+        //@audit need a max input amount
+        //MEV attack
 
         _swap(inputToken, inputAmount, outputToken, outputAmount);
     }
@@ -406,7 +426,7 @@ contract TSwapPool is ERC20 {
             revert TSwapPool__InvalidToken();
         }
 
-        //@audit //breaks our core invariant, our ratio is no longer maintained
+        //@audit //breaks our core invariant, our ratio is no longer maintained, why is the amount of extra tokens we're giving the user not based on the amount of tokens they're swapping?
         swap_count++;
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
@@ -440,7 +460,7 @@ contract TSwapPool is ERC20 {
         uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
         uint256 wethReserves = i_wethToken.balanceOf(address(this));
         // (delta Y * X) / Y = delta X
-        return (wethToDeposit * poolTokenReserves) /wethReserves ;
+        return (wethToDeposit * poolTokenReserves) / wethReserves;
     }
 
     /// @notice a more verbose way of getting the total supply of liquidity tokens
